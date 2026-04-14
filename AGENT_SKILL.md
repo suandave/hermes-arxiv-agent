@@ -158,19 +158,6 @@ After creation, confirm:
 - delivery is not `local`
 - delivery is set to `feishu`
 
-### 8. Smoke test
-
-Prefer one of these:
-
-- run `python3 monitor.py` manually once inside `PROJECT_DIR`
-- or use `/cron run <job_id>` after the cron is created
-
-Check whether:
-
-- `new_papers.json` is produced
-- `papers_record.xlsx` exists or is updated
-- `papers/` receives downloaded PDFs when new papers are found
-
 ## Agent Behavior Rules
 
 - Prefer automation over asking the user to hand-edit prompt text.

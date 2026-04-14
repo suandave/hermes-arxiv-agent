@@ -23,6 +23,7 @@ PAPERS_DIR = BASE_DIR / "papers"
 EXCEL_FILE = BASE_DIR / "papers_record.xlsx"
 VIEWER_JSON = BASE_DIR / "viewer" / "papers_data.json"
 CRAWLED_IDS_FILE = BASE_DIR / "crawled_ids.txt"
+PENDING_LLM_IDS_FILE = BASE_DIR / "pending_llm_ids.txt"
 KEYWORDS_FILE = BASE_DIR / "search_keywords.txt"
 OUTPUT_JSON = BASE_DIR / "new_papers.json"   # 输出给 hermes agent 的中间文件
 
@@ -65,6 +66,24 @@ def load_excel_ids() -> set:
     except Exception as e:
         print(f"[WARN] Failed to load Excel IDs: {e}")
         return set()
+
+
+def load_pending_llm_ids() -> set:
+    if not PENDING_LLM_IDS_FILE.exists():
+        return set()
+    with open(PENDING_LLM_IDS_FILE, "r", encoding="utf-8") as f:
+        return set(line.strip() for line in f if line.strip())
+
+
+def save_pending_llm_ids(ids: set[str] | list[str]):
+    cleaned = sorted({str(x).strip() for x in ids if str(x).strip()})
+    if not cleaned:
+        if PENDING_LLM_IDS_FILE.exists():
+            PENDING_LLM_IDS_FILE.unlink()
+        return
+    with open(PENDING_LLM_IDS_FILE, "w", encoding="utf-8") as f:
+        for arxiv_id in cleaned:
+            f.write(arxiv_id + "\n")
 
 
 def save_crawled_ids_batch(new_ids: list[str]):
@@ -364,6 +383,60 @@ def export_viewer_json_from_excel():
     print(f"[INFO] Viewer JSON updated: {VIEWER_JSON} (count={len(papers)})")
 
 
+def load_incomplete_papers_from_excel() -> dict[str, dict]:
+    """读取 Excel 中尚未完成 LLM 补全的论文。"""
+    if not EXCEL_FILE.exists():
+        return {}
+
+    wb = openpyxl.load_workbook(EXCEL_FILE, read_only=True)
+    if "Papers" not in wb.sheetnames:
+        return {}
+
+    ws = wb["Papers"]
+    header_row = next(ws.iter_rows(min_row=1, max_row=1, values_only=True), None)
+    if not header_row:
+        return {}
+
+    headers = [str(h) if h is not None else "" for h in header_row]
+    index = {name: i for i, name in enumerate(headers)}
+    required = [
+        "arxiv_id",
+        "title",
+        "authors",
+        "affiliations",
+        "published_date",
+        "categories",
+        "abstract",
+        "summary_cn",
+        "pdf_filename",
+        "crawled_date",
+        "notes",
+    ]
+    missing = [c for c in required if c not in index]
+    if missing:
+        print(f"[WARN] Missing columns in Excel, skip pending check: {missing}")
+        return {}
+
+    def norm(v: object) -> str:
+        if v is None:
+            return ""
+        return str(v).replace("\n", " ").strip()
+
+    pending: dict[str, dict] = {}
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        paper = {col: norm(row[index[col]]) for col in required}
+        arxiv_id = paper["arxiv_id"]
+        if not arxiv_id:
+            continue
+        if paper["affiliations"] and paper["summary_cn"]:
+            continue
+        paper["summary"] = paper["abstract"]
+        paper["pdf_url"] = f"https://arxiv.org/pdf/{arxiv_id}"
+        paper["pdf_local_path"] = str(PAPERS_DIR / paper["pdf_filename"]) if paper["pdf_filename"] else ""
+        pending[arxiv_id] = paper
+    return pending
+
+
 # ==================== 主流程 ====================
 
 def main():
@@ -377,9 +450,17 @@ def main():
     crawled_ids_txt = load_crawled_ids()
     crawled_ids_excel = load_excel_ids()
     crawled_ids = crawled_ids_txt | crawled_ids_excel
+    pending_ids_file = load_pending_llm_ids()
+    incomplete_excel_papers = load_incomplete_papers_from_excel()
+    pending_ids = pending_ids_file | set(incomplete_excel_papers.keys())
+    save_pending_llm_ids(pending_ids)
     print(
         f"[INFO] crawled IDs loaded | txt={len(crawled_ids_txt)} "
         f"excel={len(crawled_ids_excel)} merged={len(crawled_ids)}"
+    )
+    print(
+        f"[INFO] pending LLM IDs loaded | file={len(pending_ids_file)} "
+        f"excel_incomplete={len(incomplete_excel_papers)} merged={len(pending_ids)}"
     )
 
     # 搜索
@@ -391,20 +472,6 @@ def main():
     new_papers = [p for p in all_papers if p["arxiv_id"] not in crawled_ids]
     print(f"[INFO] {len(new_papers)} NEW papers")
 
-    if not new_papers:
-        # 无新论文，也要输出 JSON（供 hermes 生成"无新论文"消息）
-        output = {
-            "date": date.today().isoformat(),
-            "new_count": 0,
-            "new_papers": [],
-            "feishu_msg": f"✅ 今日（{date.today().isoformat()}）未发现新的 LLM 量化论文。",
-        }
-        with open(OUTPUT_JSON, "w", encoding="utf-8") as f:
-            json.dump(output, f, ensure_ascii=False, indent=2)
-        export_viewer_json_from_excel()
-        print("[INFO] No new papers. Output JSON written.")
-        return
-
     # 下载 PDF + 更新 ID
     downloaded = []
     for paper in new_papers:
@@ -412,46 +479,76 @@ def main():
         downloaded.append({**paper, "pdf_downloaded": ok})
         time.sleep(REQUEST_INTERVAL)
 
-    # 保存 Excel（summary_cn 和 affiliations 暂留空，等 LLM 填入）
-    wb = load_or_create_excel()
-    ws = wb["Papers"]
-    header_index, row_index = build_excel_row_index(ws)
-    for paper in downloaded:
-        upsert_to_excel(ws, header_index, row_index, paper)
-    save_excel(wb)
-    export_viewer_json_from_excel()
+    if downloaded:
+        # 保存 Excel（summary_cn 和 affiliations 暂留空，等 LLM 填入）
+        wb = load_or_create_excel()
+        ws = wb["Papers"]
+        header_index, row_index = build_excel_row_index(ws)
+        for paper in downloaded:
+            upsert_to_excel(ws, header_index, row_index, paper)
+        save_excel(wb)
+        export_viewer_json_from_excel()
 
-    # 批量写入 crawled_ids
-    save_crawled_ids_batch([p["arxiv_id"] for p in downloaded])
+        # 批量写入 crawled_ids
+        save_crawled_ids_batch([p["arxiv_id"] for p in downloaded])
+        pending_ids |= {p["arxiv_id"] for p in downloaded}
+
+    incomplete_excel_papers = load_incomplete_papers_from_excel()
+    papers_to_process = [incomplete_excel_papers[arxiv_id] for arxiv_id in sorted(pending_ids) if arxiv_id in incomplete_excel_papers]
+    unresolved_ids = {p["arxiv_id"] for p in papers_to_process}
+    save_pending_llm_ids(unresolved_ids)
+
+    if not papers_to_process:
+        # 无新论文，且无待补全论文
+        output = {
+            "date": date.today().isoformat(),
+            "new_count": 0,
+            "pending_count": 0,
+            "new_papers": [],
+            "papers_to_process": [],
+            "feishu_msg": f"✅ 今日（{date.today().isoformat()}）未发现新的 LLM 量化论文。",
+        }
+        with open(OUTPUT_JSON, "w", encoding="utf-8") as f:
+            json.dump(output, f, ensure_ascii=False, indent=2)
+        export_viewer_json_from_excel()
+        print("[INFO] No new papers and no pending LLM tasks. Output JSON written.")
+        return
 
     # 输出 JSON（供 hermes agent 读取并做 LLM summarization）
     output = {
         "date": date.today().isoformat(),
         "new_count": len(downloaded),
+        "pending_count": len(papers_to_process),
         "excel_file": str(EXCEL_FILE),
         "papers_dir": str(PAPERS_DIR),
-        "new_papers": downloaded,
+        "new_papers": papers_to_process,
+        "papers_to_process": papers_to_process,
         "feishu_msg": "",  # ← 由 hermes LLM 填充
     }
     with open(OUTPUT_JSON, "w", encoding="utf-8") as f:
         json.dump(output, f, ensure_ascii=False, indent=2)
 
     print(f"[INFO] Output JSON: {OUTPUT_JSON}")
-    print(f"[INFO] {len(downloaded)} papers processed. Awaiting LLM summarization...")
+    print(
+        f"[INFO] fresh_downloaded={len(downloaded)} "
+        f"pending_llm={len(papers_to_process)}. Awaiting LLM summarization..."
+    )
 
     print("\n" + "=" * 60)
     print("[LLM_SUMMARIZATION_REQUIRED]")
     print("=" * 60)
     print(f"JSON file: {OUTPUT_JSON}")
-    print(f"New papers: {len(downloaded)}")
-    for p in downloaded:
+    print(f"Fresh downloads: {len(downloaded)}")
+    print(f"Papers awaiting LLM completion: {len(papers_to_process)}")
+    for p in papers_to_process:
         print(f"  - [{p['arxiv_id']}] {p['title'][:50]}... | PDF: {p['pdf_filename']}")
     print("=" * 60)
-    print("请用 LLM（claude/gpt）完成以下两步：")
+    print("请用 LLM（claude/gpt）完成以下步骤：")
     print("  1. 读取每个 PDF 的前两页，提取作者单位（affiliations）")
     print("  2. 对每篇论文的 abstract 生成 150 字以内的中文总结（summary_cn）")
     print("  3. 将结果更新回 papers_record.xlsx 对应行")
-    print("  4. 构建飞书 Markdown 消息并输出（cronjob 自动投递到飞书）")
+    print("  4. 重建 viewer/papers_data.json")
+    print("  5. 构建飞书 Markdown 消息并输出（cronjob 自动投递到飞书）")
     print("=" * 60)
 
 

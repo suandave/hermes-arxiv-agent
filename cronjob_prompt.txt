@@ -12,9 +12,14 @@ cd /path/to/hermes-arxiv-agent && python3 monitor.py
 - 如果有 `LLM_SUMMARIZATION_REQUIRED` 部分，进入第三步。
 
 ### 第三步：读取 JSON 并完成 LLM 信息补全
-读取 `/path/to/hermes-arxiv-agent/new_papers.json`，该文件包含 new_count 和 new_papers 数组。
+读取 `/path/to/hermes-arxiv-agent/new_papers.json`，该文件包含 `new_count`、`pending_count`、`new_papers` 和 `papers_to_process`。
 
-对每篇论文必须完成以下两步：
+其中：
+- `new_count` 表示本次新抓取的论文数
+- `pending_count` 表示当前仍需要 agent 补全的论文数
+- 优先以 `papers_to_process` 作为本次必须处理的论文列表；若不存在，再使用 `new_papers`
+
+对待处理列表中的每篇论文必须完成以下两步：
 
 **1）提取作者单位 affiliations**
 - 使用 pdfplumber 或 PyMuPDF 读取 PDF（路径在 pdf_local_path 字段）前 2 页文本
