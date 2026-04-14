@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+
+papers/
+
+papers_record.xlsx
+papers_record.csv
+
+new_papers.json
+
+.gitignore
+
+!viewer/papers_data.json
