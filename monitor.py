@@ -437,9 +437,53 @@ def load_incomplete_papers_from_excel() -> dict[str, dict]:
     return pending
 
 
+def write_llm_output_json(
+    papers_to_process: list[dict],
+    fresh_downloaded_count: int = 0,
+    feishu_msg: str = "",
+):
+    """输出当前待处理状态，供 Hermes agent 继续执行或安全重试。"""
+    output = {
+        "date": date.today().isoformat(),
+        "new_count": fresh_downloaded_count,
+        "pending_count": len(papers_to_process),
+        "excel_file": str(EXCEL_FILE),
+        "papers_dir": str(PAPERS_DIR),
+        "new_papers": papers_to_process,
+        "papers_to_process": papers_to_process,
+        "feishu_msg": feishu_msg,
+    }
+    with open(OUTPUT_JSON, "w", encoding="utf-8") as f:
+        json.dump(output, f, ensure_ascii=False, indent=2)
+
+
+def sync_pending_state_from_excel(refresh_output_json: bool = True) -> list[dict]:
+    """
+    根据 Excel 当前状态重建 pending_llm_ids.txt。
+    可选同时刷新 new_papers.json，避免 agent 重试时继续读取旧待处理列表。
+    """
+    incomplete_excel_papers = load_incomplete_papers_from_excel()
+    papers_to_process = [
+        incomplete_excel_papers[arxiv_id]
+        for arxiv_id in sorted(incomplete_excel_papers)
+    ]
+    save_pending_llm_ids({p["arxiv_id"] for p in papers_to_process})
+    if refresh_output_json:
+        write_llm_output_json(papers_to_process=papers_to_process)
+    return papers_to_process
+
+
 # ==================== 主流程 ====================
 
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == "--sync-pending-state":
+        papers_to_process = sync_pending_state_from_excel(refresh_output_json=True)
+        print(
+            f"[INFO] Pending LLM state synced from Excel | "
+            f"remaining={len(papers_to_process)} output_json={OUTPUT_JSON}"
+        )
+        return
+
     print("=" * 60)
     print(f"[START] arxiv Monitor | {datetime.now().isoformat()}")
     print("=" * 60)
@@ -515,18 +559,10 @@ def main():
         return
 
     # 输出 JSON（供 hermes agent 读取并做 LLM summarization）
-    output = {
-        "date": date.today().isoformat(),
-        "new_count": len(downloaded),
-        "pending_count": len(papers_to_process),
-        "excel_file": str(EXCEL_FILE),
-        "papers_dir": str(PAPERS_DIR),
-        "new_papers": papers_to_process,
-        "papers_to_process": papers_to_process,
-        "feishu_msg": "",  # ← 由 hermes LLM 填充
-    }
-    with open(OUTPUT_JSON, "w", encoding="utf-8") as f:
-        json.dump(output, f, ensure_ascii=False, indent=2)
+    write_llm_output_json(
+        papers_to_process=papers_to_process,
+        fresh_downloaded_count=len(downloaded),
+    )
 
     print(f"[INFO] Output JSON: {OUTPUT_JSON}")
     print(

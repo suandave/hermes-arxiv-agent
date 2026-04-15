@@ -50,7 +50,19 @@ cd /path/to/hermes-arxiv-agent && python3 viewer/build_data.py
 
 确认 `viewer/papers_data.json` 已根据最新 Excel 重建，包含刚回填的 affiliations 和 summary_cn。
 
-### 第六步：构建飞书 Markdown 消息
+### 第六步：同步待处理队列
+在项目根目录执行：
+```bash
+cd /path/to/hermes-arxiv-agent && python3 monitor.py --sync-pending-state
+```
+
+要求：
+- 该步骤必须在 Excel 回填完成后执行
+- 该步骤会根据最新 Excel 状态重建 `pending_llm_ids.txt`
+- 若全部论文都已完成单位提取和中文总结，应自动清空 `pending_llm_ids.txt`
+- 该步骤还会同步刷新 `new_papers.json`，避免 agent 重试时继续读取旧的待处理论文列表
+
+### 第七步：构建飞书 Markdown 消息
 输出格式：
 ```
 📚 **论文日报** | YYYY-MM-DD
