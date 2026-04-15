@@ -1,30 +1,25 @@
 let allPapers = [];
 let favorites = new Set();
+const FAVORITES_STORAGE_KEY = "hermes-arxiv-agent:favorites";
 
-async function loadFavorites() {
-  const res = await fetch("/api/favorites", { cache: "no-store" });
-  if (!res.ok) {
-    throw new Error(`加载收藏失败: HTTP ${res.status}`);
+function loadFavorites() {
+  try {
+    const raw = window.localStorage.getItem(FAVORITES_STORAGE_KEY);
+    const payload = raw ? JSON.parse(raw) : [];
+    const arr = Array.isArray(payload) ? payload : [];
+    favorites = new Set(arr.map((x) => String(x)));
+  } catch (err) {
+    console.warn("加载本地收藏失败", err);
+    favorites = new Set();
   }
-  const payload = await res.json();
-  const arr = Array.isArray(payload.favorites) ? payload.favorites : [];
-  favorites = new Set(arr.map((x) => String(x)));
 }
 
-async function saveFavorites() {
-  const res = await fetch("/api/favorites", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ favorites: Array.from(favorites) }),
-  });
-  if (!res.ok) {
-    throw new Error(`保存收藏失败: HTTP ${res.status}`);
+function saveFavorites() {
+  try {
+    window.localStorage.setItem(FAVORITES_STORAGE_KEY, JSON.stringify(Array.from(favorites)));
+  } catch (err) {
+    throw new Error(`保存收藏失败: ${err.message || err}`);
   }
-  const payload = await res.json();
-  const arr = Array.isArray(payload.favorites) ? payload.favorites : [];
-  favorites = new Set(arr.map((x) => String(x)));
 }
 
 function isFavorite(arxivId) {
@@ -218,7 +213,7 @@ async function init() {
 
   const payload = await res.json();
   allPapers = payload.papers || [];
-  await loadFavorites();
+  loadFavorites();
 
   const defaultMin = payload.crawled_date_min || "";
   const defaultMax = payload.crawled_date_max || "";

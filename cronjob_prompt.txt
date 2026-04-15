@@ -62,7 +62,18 @@ cd /path/to/hermes-arxiv-agent && python3 monitor.py --sync-pending-state
 - 若全部论文都已完成单位提取和中文总结，应自动清空 `pending_llm_ids.txt`
 - 该步骤还会同步刷新 `new_papers.json`，避免 agent 重试时继续读取旧的待处理论文列表
 
-### 第七步：构建飞书 Markdown 消息
+### 第七步：发布静态网站
+在项目根目录执行：
+```bash
+cd /path/to/hermes-arxiv-agent && bash scripts/publish_viewer.sh
+```
+
+要求：
+- 仅提交站点相关文件，不要提交 `papers_record.xlsx`、`papers/`、`viewer/favorites.json`
+- 如果 `viewer/papers_data.json` 没有变化，可以跳过提交和 push
+- push 到 GitHub 后会触发 GitHub Actions 更新 GitHub Pages
+
+### 第八步：构建飞书 Markdown 消息
 输出格式：
 ```
 📚 **论文日报** | YYYY-MM-DD

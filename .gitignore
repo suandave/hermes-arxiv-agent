@@ -7,7 +7,6 @@ papers_record.xlsx
 papers_record.csv
 
 viewer/favorites.json
-viewer/papers_data.json
 new_papers.json
 pending_llm_ids.txt
 cronjob_prompt.generated.txt

@@ -1,6 +1,6 @@
 # hermes-arxiv-agent
 
-一个基于 Hermes 的 agent skill：每天自动从 arXiv 抓取论文，用 AI 生成中文摘要和作者单位，推送到飞书，并提供本地静态阅读网站。
+一个基于 Hermes 的 agent skill：每天自动从 arXiv 抓取论文，用 AI 生成中文摘要和作者单位，推送到飞书，并提供可部署到 GitHub Pages 的静态阅读网站。
 
 ## Hermes 对话安装
 
@@ -37,7 +37,7 @@ Hermes 会按 skill 自动完成：
 - 自动下载 PDF，维护本地 Excel 记录
 - 由 Hermes/LLM 补全作者单位和中文摘要
 - 自动推送飞书日报
-- 提供本地静态阅读网站，支持筛选、检索和收藏
+- 提供静态阅读网站，支持本地运行或 GitHub Pages 发布
 - 以 Hermes skill 的形式完成部署和日常运行
 
 ## Hermes 安装
@@ -85,5 +85,25 @@ http://localhost:8765
 
 - 日期筛选
 - 关键词全文检索
-- 收藏
+- 收藏（浏览器本地保存）
 - Abstract 展开查看
+
+## GitHub Pages
+
+仓库已支持用 GitHub Actions 发布 `viewer/` 目录到 GitHub Pages。
+
+首次启用时需要在 GitHub 仓库设置中将 Pages 的 source 切到 `GitHub Actions`。
+
+日常更新流程：
+
+```bash
+cd /path/to/hermes-arxiv-agent
+python3 viewer/build_data.py
+bash scripts/publish_viewer.sh
+```
+
+说明：
+
+- `viewer/papers_data.json` 会随提交推送到 GitHub
+- push 到 `main` 后会触发 `.github/workflows/pages.yml`
+- 公开站点的收藏功能使用浏览器 `localStorage`，不再依赖服务器端 `favorites.json`
